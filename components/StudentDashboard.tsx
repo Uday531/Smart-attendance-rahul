@@ -1,11 +1,8 @@
-
 import React, { useState, useContext, useEffect, useRef, useCallback } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
-import Webcam from 'react-webcam';
 import { AppContext } from '../App';
 import { AppContextType, Course, QrCodeData, AttendanceRecord, TimetableSlot } from '../types';
 import { calculateDistance, getCurrentPosition } from '../services/locationService';
-import { verifyFace, dataUrlToBlob } from '../services/faceRecognitionService';
 import { QrCodeIcon, CalendarIcon, ChartBarIcon, LogoutIcon, Spinner, CheckCircleIcon, XCircleIcon, MenuIcon } from './common/icons';
 import { db } from '../services/firebase';
 import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, setDoc } from 'firebase/firestore';
@@ -79,16 +76,14 @@ const ScanAttendance: React.FC = () => {
 
 const ScannerModal: React.FC<{onClose: () => void}> = ({ onClose }) => {
     const { currentUser } = useContext(AppContext) as AppContextType;
-    const [step, setStep] = useState<'scanning' | 'verifying_location' | 'verifying_face' | 'submitting' | 'result'>('scanning');
+    const [step, setStep] = useState<'scanning' | 'verifying_location' | 'result'>('scanning');
     const [result, setResult] = useState<{success: boolean; message: string} | null>(null);
-    const [qrData, setQrData] = useState<QrCodeData | null>(null);
 
     const scannerRef = useRef<HTMLDivElement>(null);
-    const webcamRef = useRef<Webcam>(null);
     const html5QrCodeRef = useRef<Html5Qrcode | null>(null);
 
     const handleScanSuccess = useCallback(async (decodedText: string) => {
-        if (html5QrCodeRef.current?.isScanning) {
+        if (html5QrCodeRef.current) {
             try {
                 await html5QrCodeRef.current.stop();
             } catch(err) {
@@ -99,9 +94,8 @@ const ScannerModal: React.FC<{onClose: () => void}> = ({ onClose }) => {
         setStep('verifying_location');
         try {
             const parsedQrData: QrCodeData = JSON.parse(decodedText);
-            setQrData(parsedQrData);
             
-            if (Date.now() - parsedQrData.timestamp > 30000) {
+            if (Date.now() - parsedQrData.timestamp > 30000) { // Increased validity to 30s
                 setResult({ success: false, message: 'Expired QR Code. Please scan the new one.' });
                 setStep('result');
                 return;
@@ -115,85 +109,53 @@ const ScannerModal: React.FC<{onClose: () => void}> = ({ onClose }) => {
                 parsedQrData.location.longitude
             );
 
-            if (distance > 20) {
+            if (distance > 20) { // Increased range to 20m
                  setResult({ success: false, message: `You are ${Math.round(distance)}m away. Must be within 20m to mark attendance.` });
                  setStep('result');
                  return;
             }
             
-            // Location verified, move to face verification
-            setStep('verifying_face');
-
-        } catch (error) {
-            const message = error instanceof Error ? error.message : "An unknown error occurred.";
-            setResult({ success: false, message: `QR code validation failed: ${message}` });
-            setStep('result');
-        }
-    }, []);
-    
-    const handleFaceVerification = async () => {
-        const image = webcamRef.current?.getScreenshot();
-        if (!image) {
-            setResult({ success: false, message: 'Could not capture image. Please try again.' });
-            setStep('result');
-            return;
-        }
-
-        setStep('submitting');
-
-        try {
-            const imageBlob = dataUrlToBlob(image);
-            const verificationResult = await verifyFace(imageBlob);
-
-            if (!verificationResult.success || !verificationResult.uid) {
-                setResult({ success: false, message: verificationResult.message || 'Face verification failed. Please try again.' });
-                setStep('result');
-                return;
-            }
-
-            if (verificationResult.uid !== currentUser!.id) {
-                setResult({ success: false, message: 'Face does not match your registered profile.' });
-                setStep('result');
-                return;
-            }
-
-            // Face verified and matches current user, proceed to mark attendance
-            if (!qrData) throw new Error("QR data is missing.");
-                
             const today = new Date().toISOString().split('T')[0];
-            const attendanceId = `${currentUser!.id}_${qrData.courseId}_${today}`;
+            const attendanceId = `${currentUser!.id}_${parsedQrData.courseId}_${today}`;
             const attendanceRef = doc(db, 'attendance', attendanceId);
             
             await setDoc(attendanceRef, {
                 studentId: currentUser!.id,
-                courseId: qrData.courseId,
+                courseId: parsedQrData.courseId,
                 date: today,
                 status: 'present',
-                markedBy: qrData.facultyId,
+                markedBy: parsedQrData.facultyId,
             });
 
-            const courseRef = doc(db, 'courses', qrData.courseId);
+            const courseRef = doc(db, 'courses', parsedQrData.courseId);
             await updateDoc(courseRef, {
                 studentIds: arrayUnion(currentUser!.id)
             });
 
-            setResult({ success: true, message: 'Face verified & attendance marked successfully!' });
+            setResult({ success: true, message: 'Attendance marked successfully!' });
             setStep('result');
 
         } catch (error) {
-             const message = error instanceof Error ? error.message : "An unknown error occurred.";
-             setResult({ success: false, message: `An error occurred: ${message}` });
-             setStep('result');
+            const message = error instanceof Error ? error.message : "An unknown error occurred.";
+            setResult({ success: false, message: `Verification failed: ${message}` });
+            setStep('result');
         }
-    };
-
+    }, [currentUser]);
+    
     useEffect(() => {
         if (step === 'scanning' && scannerRef.current && !html5QrCodeRef.current) {
             const html5QrCode = new Html5Qrcode(scannerRef.current.id);
             html5QrCodeRef.current = html5QrCode;
             html5QrCode.start(
                 { facingMode: "environment" },
-                { fps: 10, qrbox: { width: 250, height: 250 } },
+                {
+                    fps: 10,
+                    qrbox: (viewfinderWidth, viewfinderHeight) => {
+                        const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                        const qrboxSize = Math.floor(minEdge * 0.8);
+                        return { width: qrboxSize, height: qrboxSize };
+                    }
+                },
                 handleScanSuccess,
                 (errorMessage) => { /* ignore errors */ }
             ).catch(err => {
@@ -212,11 +174,10 @@ const ScannerModal: React.FC<{onClose: () => void}> = ({ onClose }) => {
     }, [step, handleScanSuccess]);
 
     const VerificationStepper = ({ currentStep }: { currentStep: typeof step }) => {
-        const steps = ['Scan QR', 'Location', 'Face ID'];
+        const steps = ['Scan QR', 'Location'];
         let activeIndex = 0;
         if (currentStep === 'verifying_location') activeIndex = 1;
-        else if (currentStep === 'verifying_face') activeIndex = 2;
-        else if (currentStep === 'submitting' || currentStep === 'result') activeIndex = 3;
+        else if (currentStep === 'result') activeIndex = 2;
 
         return (
             <div className="w-full px-4 sm:px-8 mb-6">
@@ -248,39 +209,12 @@ const ScannerModal: React.FC<{onClose: () => void}> = ({ onClose }) => {
                     <div id="qr-reader" ref={scannerRef} className="w-full h-auto rounded-lg overflow-hidden"></div>
                 </>;
             case 'verifying_location':
-                 return <div className="text-center p-8 flex flex-col items-center justify-center min-h-[300px]">
+                 return <div className="text-center p-8 flex flex-col items-center justify-center min-h-[250px]">
                      <Spinner />
                      <p className="mt-4 text-lg">Verifying your location...</p>
                  </div>;
-            case 'verifying_face':
-                 return <div className="flex flex-col items-center">
-                    <p className="text-text-secondary mb-4 text-center">Center your face in the frame for verification.</p>
-                    <div className="rounded-lg overflow-hidden w-full aspect-square max-w-sm">
-                         {/* FIX: Add missing required props to satisfy WebcamProps type due to a likely typing issue in the library. */}
-                         <Webcam
-                            audio={false}
-                            ref={webcamRef}
-                            screenshotFormat="image/jpeg"
-                            videoConstraints={{ facingMode: "user" }}
-                            className="w-full h-full object-cover"
-                            mirrored={false}
-                            forceScreenshotSourceSize={false}
-                            imageSmoothing={true}
-                            disablePictureInPicture={false}
-                            onUserMedia={() => {}}
-                            onUserMediaError={() => {}}
-                            screenshotQuality={0.92}
-                        />
-                    </div>
-                    <button onClick={handleFaceVerification} className="mt-4 w-full bg-highlight hover:bg-teal-500 text-white font-bold py-2 px-4 rounded">Verify My Face</button>
-                 </div>
-            case 'submitting':
-                 return <div className="text-center p-8 flex flex-col items-center justify-center min-h-[300px]">
-                     <Spinner />
-                     <p className="mt-4 text-lg">Verifying face & marking attendance...</p>
-                 </div>;
             case 'result':
-                return <div className="text-center p-8 flex flex-col items-center justify-center min-h-[300px]">
+                return <div className="text-center p-8 flex flex-col items-center justify-center min-h-[250px]">
                     {result?.success ? <CheckCircleIcon /> : <XCircleIcon />}
                     <p className="mt-4 text-lg">{result?.message}</p>
                 </div>;

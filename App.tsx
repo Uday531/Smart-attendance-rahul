@@ -1,16 +1,11 @@
-
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, AppContextType, Role } from './types';
 import LoginPage from './components/LoginPage';
 import FacultyDashboard from './components/FacultyDashboard';
 import StudentDashboard from './components/StudentDashboard';
 import SignUpPage from './components/SignUpPage';
 import { auth, db } from './services/firebase';
-// FIX: The `onAuthStateChanged` and `User` exports are not available in the modular `firebase/auth` library with the current setup.
-// Using the compat library for authentication.
 import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import { doc, getDoc } from 'firebase/firestore';
 import { Spinner } from './components/common/icons';
 
 export const AppContext = React.createContext<AppContextType | null>(null);
@@ -21,23 +16,25 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // FIX: Switched from modular `onAuthStateChanged(auth, ...)` to compat `auth.onAuthStateChanged(...)`.
     const unsubscribe = auth.onAuthStateChanged(async (firebaseUser: firebase.User | null) => {
       if (firebaseUser) {
         try {
-          const userDocRef = doc(db, 'users', firebaseUser.uid);
-          const userDoc = await getDoc(userDocRef);
-          if (userDoc.exists()) {
-            setCurrentUser({ id: userDoc.id, ...userDoc.data() } as User);
+          const userDoc = await db.collection('users').doc(firebaseUser.uid).get();
+          
+          if (userDoc.exists) {
+            const userData = userDoc.data();
+            setCurrentUser({ 
+              id: userDoc.id, 
+              ...userData 
+            } as User);
           } else {
-            // Handle case where user exists in Auth but not Firestore
             console.error("User data not found in Firestore.");
-            auth.signOut();
+            await auth.signOut();
             setCurrentUser(null);
           }
         } catch (error) {
           console.error("Error fetching user data:", error);
-          auth.signOut();
+          await auth.signOut();
           setCurrentUser(null);
         }
       } else {
@@ -45,6 +42,7 @@ const App: React.FC = () => {
       }
       setLoading(false);
     });
+
     return () => unsubscribe();
   }, []);
 
@@ -52,10 +50,14 @@ const App: React.FC = () => {
     setCurrentUser(user);
   };
 
-  const handleLogout = () => {
-    auth.signOut();
-    setCurrentUser(null);
-    setView('login');
+  const handleLogout = async () => {
+    try {
+      await auth.signOut();
+      setCurrentUser(null);
+      setView('login');
+    } catch (error) {
+      console.error("Logout error:", error);
+    }
   };
 
   const contextValue = useMemo(() => ({
