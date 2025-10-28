@@ -1,0 +1,8 @@
+{
+  "name": "Smart Attendance System-khamalesh2905",
+  "description": "A QR-based attendance management system for students and faculty, featuring dynamic QR codes, geolocation verification, and simulated face identification for a secure and modern attendance tracking experience.",
+  "requestFramePermissions": [
+    "camera",
+    "geolocation"
+  ]
+}

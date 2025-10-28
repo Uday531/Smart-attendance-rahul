@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Smart Attendance System</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'primary': '#1a202c',
+              'secondary': '#2d3748',
+              'accent': '#4a5568',
+              'highlight': '#38b2ac',
+              'text-primary': '#edf2f7',
+              'text-secondary': '#a0aec0',
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      /* Fix for mirrored video feed in the QR code scanner */
+      #qr-reader video {
+        transform: scaleX(-1);
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "qrcode.react": "https://aistudiocdn.com/qrcode.react@^4.2.0",
+    "html5-qrcode": "https://aistudiocdn.com/html5-qrcode@^2.3.8",
+    "react-webcam": "https://aistudiocdn.com/react-webcam@^7.2.0",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.4.0/"
+  }
+}
+</script>
+</head>
+  <body class="bg-primary text-text-primary">
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
